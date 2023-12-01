@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.11.7/video-js.min.css" rel="stylesheet" />
+
+    <style>
+        .video-js .vjs-slider-bar::before {
+            z-index: 2;
+        }
+
+        .vjs-marker {
+            position: absolute;
+            background: #f70000;
+            width: 5px;
+            height: 100%;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        .video-js .vjs-progress-control .vjs-mouse-display {
+            z-index: 2;
+        }
+
+        .vjs-progress-control:hover .vjs-mouse-display .vjs-time-tooltip {
+            width: max-content;
+            left: 50%;
+            display: flex;
+            gap: 0.2em;
+            transform: translateX(-50%);
+            font-size: 14px;
+        }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.11.7/video.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-eme@3.8.0/dist/videojs-contrib-eme.js"></script>
+
+    <title>Test VideoJS DRM</title>
+</head>
+<body>
+
+    <div style="margin: 50px auto;">
+        <video
+            id="myPlayerID"
+            class="video-js"
+            controls
+            preload="auto"
+            width="640"
+            height="264"
+            data-setup="{}"
+        ></video>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var player = videojs(
+                'myPlayerID',
+                {
+                    controls: true,
+                    fluid: true,
+                    html5: {
+                        vhs: {
+                            overrideNative: true
+                        }
+                    }
+                },
+                function () {
+                    var player = this;
+                    player.eme();
+                    player.src({
+                        src: 'https://cdn.bitmovin.com/content/assets/art-of-motion_drm/mpds/11331.mpd',
+                        type: 'application/dash+xml',
+                        keySystems: {
+                            'com.widevine.alpha': 'https://cwip-shaka-proxy.appspot.com/no_auth',
+                        }
+                    });
+
+                    player.ready(function () {
+                        player.tech(true).on('keystatuschange', function (event) {
+                            console.log("event: ", event);
+                        });
+                        addMarkers();
+                    });
+                }
+            );
+
+            const scrollToSegment = (segmentTime) => {
+                const startTime = formatedTimeToSeconds(segmentTime);
+                player.currentTime(startTime);
+                player.play();
+            };
+
+            const formatedTimeToSeconds = (time) => {
+                const timeSplit = time.split(':');
+                const seconds = +timeSplit.pop();
+
+                return timeSplit.reduce((acc, curr, i, arr) => {
+                    if (arr.length === 2 && i === 1) return acc + +curr * 60 ** 2;
+                    else return acc + +curr * 60;
+                }, seconds);
+            };
+
+            const timeEl = (time) => {
+                return videojs.dom.createEl('span', undefined, undefined, `(${time})`);
+            };
+
+            const labelEl = (label) => {
+                return videojs.dom.createEl('strong', undefined, undefined, label);
+            };
+
+            const addMarkers = () => {
+                requestAnimationFrame(() => {
+                    const total = player.duration();
+                    const { seekBar } = player.controlBar.progressControl;
+
+                    markers.forEach((marker, index) => {
+                        const markerTime = marker.time;
+                        const left = (markerTime / total) * 100 + '%';
+
+                        const markerEl = videojs.dom.createEl('div', undefined, {
+                            class: 'vjs-marker',
+                            style: `left: ${left}`,
+                            onclick: () => scrollToSegment(marker.time), // Add click event to scroll to the segment
+                        });
+
+                        // Add time range information to the marker
+                        markerEl.timeRange = marker;
+
+                        seekBar.el().append(markerEl);
+                    });
+                });
+            };
+
+            const markers = [
+                { time: 0, label: 'Introduction' },
+                { time: 10, label: 'Starting of workout session' },
+                { time: 30, label: 'Yet another segment' },
+                { time: 50, label: 'Another segment' },
+                { time: 90, label: 'Another segment: HelloShiv segment ' },
+            ];
+
+            player.on('loadedmetadata', addMarkers);
+
+            player.getDescendant([
+                'controlBar',
+                'progressControl',
+                'seekBar',
+                'mouseTimeDisplay',
+                'timeTooltip',
+            ]).update = function (seekBarRect, seekBarPoint, time) {
+                const currentSeconds = formatedTimeToSeconds(time);
+
+                const markerIndex = markers.findIndex(({ time: markerTime }, index) => {
+                    const nextMarkerTime = index < markers.length - 1
+                        ? markers[index + 1].time
+                        : Number.POSITIVE_INFINITY;
+
+                    return currentSeconds >= markerTime && currentSeconds < nextMarkerTime;
+                });
+
+                if (markerIndex > -1) {
+                    const { label } = markers[markerIndex];
+
+                    videojs.dom.emptyEl(this.el());
+                    videojs.dom.appendContent(this.el(), [labelEl(label), timeEl(time)]);
+
+                    return;
+                }
+
+                this.write(time);
+            };
+        });
+    </script>
+</body>
+</html>
